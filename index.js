@@ -2,7 +2,7 @@
 // @name         QQ群相册批量下载
 // @namespace    http://lvshuncai.com
 // @homepage     https://github.com/ShunCai/QQ-Group-Albums-Downloader
-// @version      1.1
+// @version      1.2
 // @description  自动点击QQ群相册的下载功能，实现所有的群相册的批量下载
 // @author       芷炫
 // @match        https://h5.qzone.qq.com/groupphoto/index?inqq=*&groupId=*
@@ -100,13 +100,19 @@
         textArea.focus();
         textArea.select();
 
-        // 执行复制命令并移除文本框
-        let res = document.execCommand('copy');
-        if (res) {
-
-            // Chrome requires the timeout
-            await delay(1000);
-
+        try {
+            // 执行复制命令
+            const copied = document.execCommand('copy');
+            if (!copied) {
+                // 部分浏览器在异步等待后丢失焦点，复制会静默失败，这里尝试用Clipboard API兜底
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    throw new Error('复制失败：浏览器未授予剪切板权限，请点击按钮后保持页面聚焦');
+                }
+            }
+        } finally {
+            // 无论成功失败都移除文本框
             textArea.remove();
         }
     }
@@ -115,7 +121,12 @@
     const copyAlbumUrls = async albums => {
         const urls = [];
         for (const album of albums) {
-            urls.push(album.downloadUrl);
+            if (album.downloadUrl) {
+                urls.push(album.downloadUrl);
+            }
+        }
+        if (!urls.length) {
+            throw new Error('未获取到相册下载链接');
         }
         await copyToClipboard(urls.join('\n'));
     }
@@ -124,7 +135,7 @@
     var getDownloadUrl = async album => {
         // 请求地址参数
         const urlParmas = new URLSearchParams();
-        urlParmas.append('g_tk', PSY.user.token());
+        urlParmas.append('g_tk', PSY.user.token('https://h5.qzone.qq.com/proxy/domain/app.photo.qq.com/cgi-bin/app/cgi_arch_photo_v2'));
         urlParmas.append('qzonetoken', window.g_qzonetoken);
         // 请求实体参数
         const bodyParmas = new URLSearchParams();
@@ -154,7 +165,7 @@
     // 获取相册信息
     const getAlbumInfo = async(page) => {
         const parmas = new URLSearchParams();
-        parmas.append('g_tk', PSY.user.token());
+        parmas.append('g_tk', PSY.user.token('https://h5.qzone.qq.com/proxy/domain/u.photo.qzone.qq.com/cgi-bin/upp/qun_list_album_v2'));
         parmas.append('qzonetoken', window.g_qzonetoken);
         parmas.append('qunId', getQueryString('groupId'));
         parmas.append('uin', PSY.user.getLoginUin());
@@ -213,22 +224,27 @@
     $downloadBtn.addEventListener("click", async function() {
 
         // 获取相册列表
-        if (!window.albums) {
-            this.innerText = '正在读取相册下载链接...';
-            window.albums = await getAlbumList();
-            await getDownloadLinks(window.albums);
+        try {
+            if (!window.albums) {
+                this.innerText = '正在读取相册下载链接...';
+                window.albums = await getAlbumList();
+                await getDownloadLinks(window.albums);
+            }
+
+            this.innerText = '正在下载';
+
+            // 浏览器下载
+            await download(this, albums);
+
+            this.innerText = '下载完成';
+
+            setTimeout(() => {
+                this.innerText = '批量下载';
+            }, 3000);
+        } catch (error) {
+            console.error(error);
+            this.innerText = '下载失败：' + error.message;
         }
-
-        this.innerText = '正在下载';
-
-        // 浏览器下载
-        await download(this, albums);
-
-        this.innerText = '下载完成';
-
-        setTimeout(() => {
-            this.innerText = '批量下载';
-        }, 3000);
     })
     $uploadBtn.parentElement.appendChild($downloadBtn);
 
@@ -241,22 +257,27 @@
     $thunderBtn.addEventListener("click", async function() {
 
         // 获取相册列表
-        if (!window.albums) {
-            this.innerText = '正在读取相册下载链接...';
-            window.albums = await getAlbumList();
-            await getDownloadLinks(window.albums);
+        try {
+            if (!window.albums) {
+                this.innerText = '正在读取相册下载链接...';
+                window.albums = await getAlbumList();
+                await getDownloadLinks(window.albums);
+            }
+
+            this.innerText = '正在触发迅雷';
+
+            // 迅雷下载
+            await invokeThunder(albums);
+
+            this.innerText = '已触发，若未下载，请打开迅雷后重试';
+
+            setTimeout(() => {
+                this.innerText = '迅雷下载';
+            }, 3000);
+        } catch (error) {
+            console.error(error);
+            this.innerText = '失败：' + error.message;
         }
-
-        this.innerText = '正在触发迅雷';
-
-        // 迅雷下载
-        await invokeThunder(albums);
-
-        this.innerText = '已触发，若未下载，请打开迅雷后重试';
-
-        setTimeout(() => {
-            this.innerText = '迅雷下载';
-        }, 3000);
     })
     $uploadBtn.parentElement.appendChild($thunderBtn);
 
@@ -269,22 +290,27 @@
     $copyLinks.addEventListener("click", async function() {
 
         // 获取相册列表
-        if (!window.albums) {
-            this.innerText = '正在读取相册下载链接...';
-            window.albums = await getAlbumList();
-            await getDownloadLinks(window.albums);
+        try {
+            if (!window.albums) {
+                this.innerText = '正在读取相册下载链接...';
+                window.albums = await getAlbumList();
+                await getDownloadLinks(window.albums);
+            }
+
+            this.innerText = '正在复制';
+
+            // 复制到剪切板
+            await copyAlbumUrls(albums);
+
+            this.innerText = '复制完成';
+
+            setTimeout(() => {
+                this.innerText = '复制链接';
+            }, 3000);
+        } catch (error) {
+            console.error(error);
+            this.innerText = '失败：' + error.message;
         }
-
-        this.innerText = '正在复制';
-
-        // 复制到剪切板
-        await copyAlbumUrls(albums);
-
-        this.innerText = '复制完成';
-
-        setTimeout(() => {
-            this.innerText = '复制链接';
-        }, 3000);
     })
     $uploadBtn.parentElement.appendChild($copyLinks);
 
